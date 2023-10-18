@@ -1,0 +1,462 @@
+---
+output:
+  pdf_document: default
+  title: "Esame"
+  html_document: default
+---
+
+```{r}
+library(corrplot)
+library(car) 
+library(FactoMineR)
+library(factoextra)
+library(MASS)
+```
+
+ws
+Name of the column representing wind speed.
+
+wd
+Name of the column representing wind direction.
+
+AH_day
+Name of the column representing Absolute humidity
+
+
+
+Caricamento dati con omissione NA e stampa informazioni
+
+```{r}
+
+dati <- read.csv("Gruppo_F/dati_meteo_O3.csv")
+dati <- na.omit(dati)
+summary(dati)
+
+
+```
+La prima variabile non e' numerica e la seconda è categoriale, il resto sono numeriche
+
+
+
+
+
+```{r}
+
+dati_pca <- dati[,c(3:12)]
+
+```
+
+Per realizzare il correlogramma rimuovo le prime due colonne 
+
+Creo il correlogramma
+
+```{r}
+
+R <- cor(dati_pca)
+
+corrplot(R)
+```
+creo anche un grafico coi valori delle correllazioni, gli scatter plot e le loro distribuzioni
+```{r}
+library(psych)
+
+pairs.panels(dati_pca,
+             gap = 0,
+             bg = c("red", "yellow", "blue")[dati$campag],
+             pch=21)
+```
+
+Condizioni metereologiche: temperatura, pressione, umidita', precipitazioni e il vento
+colonne: "campag" "wd_vett" "ws_vett" "ws_scal" "umidit" "temp_med" "pressione" "precipitazione" "AH_day"  
+Caratteristiche delle giornate:
+"radiazione" "O3"
+
+Studio quindi le correlazioni tra O3 e radiozione con il resto delle variabili
+
+Per l'ozono noto correlazione positiva elevata con la temperatura media (0.90547118), sempre correlata positivamente ma in maniera minore con la velocita' del vento scalare (0.572159470) e con l'umidita' assoluta (0.60408933).
+E' presente inoltre correlazione negativa elevata con l'umidita' (-0.83439596)
+
+
+Per le radazioni noto correlazione positiva elevata con la temperatura media (0.86603771), sempre correlata positivamente ma in maniera minore con la velocita' del vento scalare (0.522133215) e con l'umidita' assoluta (0.51049568).
+E' presente inoltre correlazione negativa elevata con l'umidita' (-0.88191581)
+
+Possiamo concludere che le due variabili studiate sono molto correlate (0.93026623) tra loro e hanno un comportamento simile rispetto alle variabili metereologiche 
+
+
+
+otto la diagonale vengono mostrati gli scatter plot, sopra la diagonale venogono mostrati le correlazioni
+umidità, temperatura media e radiazione sono molto correlate --> problemi collinearità
+
+
+
+
+Realizzo grafico a barre per studiare comportamento della presenza di ozono e delle radiazioni in funzione delle campagne
+
+```{r}
+
+mean_radizioni <- tapply(dati$radiazione,dati$campag , mean)
+mean_O3 <- tapply(dati$O3,dati$campag , mean)
+par(mfrow=c(1,2))
+barplot(mean_radizioni, ylab = "Radiazione", xlab = "Campagna")
+barplot(mean_O3, ylab = "O3", xlab = "Campagna")
+```
+
+Si osservano valori maggiori di radiazioni e ozono nelle campagne 2 e 8 
+
+
+
+Realizzo componenti principali per studiare presenza ozono 
+Creo quindi ulteriore dataframe senza dati O3
+
+```{r}
+
+
+dati_no_O3 <- dati[,c(3:11)]
+
+par(mfrow=c(2,1))
+
+pca <- PCA(X = dati_no_O3, scale.unit = T, graph = FALSE)
+
+fviz_pca_biplot(pca)
+```
+```{r}
+fviz_pca_var(pca,
+             col.var = "contrib", # Color by contributions to the PC
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE     # Avoid text overlapping
+             )
+
+```
+Primo grafico posizione ogni giornata in funzione delle prime due componenti principali, le frecce indicano la correlazione tra ogni variabile e le componenti principali
+Il secondo grafico riporta solamente le correlazioni tra ogni variabile e le componenti principali, mentre il colore illustra il valore in modulo delle correlazioni
+
+
+Guardando le frecce possiamo interpretare le componenti principali:
+La prima componente presenta alta correlazione positiva con la temperatura e le radiazioni solari e negativo con l'umidita', 
+Possiamo quindi interpretarla come "Giornata di sole"
+La seconda componente presenta alta correlazione positiva con le precipitazioni e inversamente con la pressione,
+possiamo quindi interpretarla come "Giornata di maltempo"
+
+
+
+```{r}
+pairs.panels(pca$ind$coord,
+             gap=0,
+             bg = c("red", "yellow", "blue")[dati$campag],
+             pch=21)
+```
+come da teoria i coefficienti di correlazione devono essere 0
+
+
+
+
+Proporzione di variabilita' e regola di keiser presente in $eig
+
+
+```{r}
+pca$eig
+```
+Per la regola di Keiser valutiamo l'inserimento delle variabili con eigenvalue superiore o pari a 1, valutiamo pero' l'inserimento della quarta componente (leggermente minore di 1)
+Per la regola di proporzione di variabilita' inserirei solo le prime tre componenti
+Decidiamo in ogni caso di inserire la quarta componente visto il valore prossimo a 1 del suo eigenvalue
+
+
+Produco il grafico a gomito (scree diagram):
+
+```{r}
+fviz_eig(pca)
+```
+Il grafico suggerirebbe l'inserimento di 3 componenti
+
+
+
+Con pca$var$coord restituiamo le correlazioni tra le variabili e le componenti principali (potenzialmente utilizzabili per interpretarle)
+Con pca$ind$coord produciamo le nuove coordinate delle unita' in base alle componenti principali, e le utilizziamo per costruire un modello di regressione lineare che spieghi la varibile ozono
+
+
+```{r}
+pca$var$coord
+```
+
+```{r}
+#pca$ind$coord
+```
+
+```{r}
+pca_coord <- as.data.frame(pca$ind$coord)
+pca_coord[,6] <- dati[,12]
+colnames(pca_coord) <- c("Dim.1", "Dim.2", "Dim.3", "Dim.4", "Dim.5", "O3")
+
+
+mod_completo <- lm(formula = O3 ~ ., data = pca_coord)
+summary(mod_completo)
+
+```
+
+
+Per teoria scegliamo le prime 4 componenti e le utliziamo per regressione 
+Poi selezione tramite stepwise nuovo modello
+
+```{r}
+
+mod_1 <- lm(formula = O3 ~ Dim.1 + Dim.2 + Dim.3 + Dim.4, data = pca_coord)
+
+
+mod_2 <- stepAIC(mod_1, direction = "both")
+
+summary(mod_1)
+
+summary(mod_2)
+```
+
+In base a Adjusted R-squared scegliamo il secondo modello, in quanto l'omissione di "Dim.2" non compromette la variabilita' spiegata dal modello
+
+
+
+
+```{r}
+plot(mod_2,which = 1)
+```
+
+Residuals vs fitted: L'andamento parabolico del grafico mostra relazione non lineare (ma varianza unitaria costante)
+
+
+```{r}
+plot(mod_2,which = 2)
+```
+QQ plot: conferma normalita' distributiva dei residui (bande di significativita' confermano)
+
+
+```{r}
+plot(mod_2, which=3)
+```
+
+Scale-location:inea praticamente parallela all'asse delle x, omoschedasticita' 
+
+```{r}
+plot(mod_2, which=4)
+```
+Cook's distance: notiamo almeno 2 osservazioni potenzialmente influneti (30, 66)
+
+
+```{r}
+plot(mod_2, which=5)
+```
+Residuals vs Leverage: Misura peso che ha ogni unita' nel determinare curvatora del coefficiente di regressione:
+unita' 66 unico punto che potrebbe essere punto di leva(non supera pero' distanza di Cook)
+
+
+
+```{r}
+plot(mod_2, which=6)
+```
+Cook's dist -vs- leverage: viene utilizzato per rilevare punti influenti (che possono avere un grande effetto sul risultato e sull'accuratezza della regressione). Le osservazioni con leva elevata sono quelle che hanno valori predittivi molto lontani dalle loro medie, il che può influenzare notevolmente il modello adattato.
+
+I contorni nel grafico a dispersione sono residui standardizzati etichettati con le loro grandezze.
+
+osserviamo come il valore 66 viene posto all'estremità del grafico 
+
+
+```{r}
+olsrr::ols_plot_resid_lev(mod_2)
+```
+
+
+Effettuiamo test per trovare outliers
+
+```{r}
+outlierTest(mod_2)
+```
+No Studentized residuals with Bonferroni p < 0.05
+Non ci sono outliers
+
+
+Creiamo residui di student e ne testiamo la distribuzione normale con shapiro test
+
+```{r}
+
+e_std <- studres(mod_2)
+
+shapiro.test(e_std)
+```
+Normalità distributiva rispettata
+
+
+
+Visualiziamo distribuzione dei residui tramite istogramma
+
+```{r}
+hist(e_std, prob = T,breaks = 20)
+lines(x = density(x = e_std), col = "red",lwd=2)
+curve(dnorm(x,mean=mean(e_std),sd=sd(e_std)), add=TRUE,col="blue",lwd=3)
+legend("topright", c("e_std distribution", "normal distribution"), fill=c("red", "blue"))
+```
+
+Istogramma ricorda distribuzione normale
+
+
+Boxplot, genero una distribuzione normale con la stessa media (≈ 0) e sd dei residui (≈ 1) e li plotto insieme per confronto
+
+```{r}
+e_norm <- rnorm(1000,mean=mean(e_std, na.rm=TRUE), sd=sd(e_std, na.rm=TRUE))
+```
+
+
+
+```{r}
+boxplot(e_std,e_norm,
+main = "Boxplot of e_std -vs- normal", at=c(1,2),names = c('e_std','e_norm'),
+col = c("light blue","forest green"), las=2,
+border = "blue",
+horizontal = TRUE,
+notch = TRUE
+)
+```
+il boxplot si avvicina alla distribuzione normale
+
+
+```{r}
+crPlots(mod_2)
+```
+Permette di visualizzare quanto si allontana la linearita' dal comportamento dei nostri dati
+I dati si comportano lineramente
+
+
+
+Creo modello con log per studiare l'apparente relazione non lineare dei residuals vs fitted
+
+```{r}
+mod_11 <- lm(formula = log(O3) ~ Dim.1 + Dim.2 + Dim.3 + Dim.4, data = pca_coord)
+mod_12 <- stepAIC(mod_11, direction = "both")
+``` 
+
+
+```{r}
+summary(mod_2)
+```
+
+```{r}
+summary(mod_12)
+```
+
+```{r}
+par(mfrow=c(1,2))
+plot(mod_12,which = 1)
+plot(mod_12,which = 5)
+```
+```{r}
+par(mfrow=c(1,2))
+plot(mod_12,which = 4)
+plot(mod_12,which = 6)
+```
+i residuals -vs- fitted hanno un andamento più lineare, tuttavia la varianza unitaria assume un comportamento eteroschedastico
+
+il modello peggiora per quanto riguarda le osservazioni influenti, in particolare la 56 e la 73
+
+
+
+
+
+racchiudo i fattori meteorologici all'interno di gruppi, usando la funzione ellipse=TRUE intorno a ogni gruppo
+
+```{r}
+library(devtools)
+library(ggbiplot)
+
+ggbiplot(pca,ellipse=TRUE,  labels=rownames(pca), groups=dati$campag)+
+  ggtitle("PCA of weather dataset")
+```
+
+grafico della terza e quarta componente principale
+```{r}
+ggbiplot(pca,ellipse=TRUE,choices = c(3,4),  labels=rownames(pca), groups=dati$campag)
+```
+
+
+
+```{r}
+fviz_pca_var(pca,axes = c(3,4),
+             col.var = "contrib", # Color by contributions to the PC
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE     # Avoid text overlapping
+             )
+```
+```{r}
+fviz_pca_var(pca,axes = c(1,5),
+             col.var = "contrib", # Color by contributions to the PC
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE     # Avoid text overlapping
+             )
+```
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+
+
+
+
+
+
+
